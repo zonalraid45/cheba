@@ -1,5 +1,5 @@
 import requests
-import re
+import json
 import time
 
 TEAM_ID = "--elite-chess-players-union--"
@@ -7,82 +7,97 @@ TEAM_ID = "--elite-chess-players-union--"
 session = requests.Session()
 
 session.headers.update({
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept-Language": "en-US,en;q=0.9"
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/x-ndjson"
 })
 
-# Fetch team page
-url = f"https://lichess.org/team/{TEAM_ID}"
+# Official API endpoint
+url = f"https://lichess.org/api/team/{TEAM_ID}/arena"
 
-resp = session.get(url, timeout=20)
+print("Fetching full arena history...")
 
-print("STATUS:", resp.status_code)
+r = session.get(url, stream=True, timeout=60)
 
-if resp.status_code != 200:
-    print(resp.text[:500])
-    raise SystemExit("Failed to fetch team page")
-
-html = resp.text
-
-# Extract tournament IDs
-ids = set(re.findall(r'/tournament/([a-zA-Z0-9]{8})', html))
-
-print(f"Found {len(ids)} tournaments")
+if r.status_code != 200:
+    print("Failed:", r.status_code)
+    exit()
 
 results = []
 
-for tid in ids:
+count = 0
+
+for line in r.iter_lines():
+
+    if not line:
+        continue
 
     try:
+        data = json.loads(line)
+
+        count += 1
+
+        tid = data.get("id")
+
+        print("Checking:", tid)
+
+        # Need full tournament details
         api_url = f"https://lichess.org/api/tournament/{tid}"
 
-        r = session.get(api_url, timeout=20)
+        rr = session.get(api_url, timeout=20)
 
-        if r.status_code != 200:
-            print("Skipped:", tid)
+        if rr.status_code != 200:
             continue
 
-        data = r.json()
+        tdata = rr.json()
 
-        clock = data.get("clock", {})
+        clock = tdata.get("clock", {})
 
-        # 3+0 only
+        # 3+0
         if clock.get("limit") != 180:
             continue
 
         if clock.get("increment") != 0:
             continue
 
-        # 12h only
-        if data.get("minutes") != 720:
+        # 12h
+        if tdata.get("minutes") != 720:
             continue
 
-        battle = data.get("teamBattle")
+        battle = tdata.get("teamBattle")
 
         if not battle:
             continue
 
-        teams = battle.get("teams")
+        teams = None
+
+        if isinstance(battle, dict):
+            teams = battle.get("teams")
+
+        elif isinstance(battle, list):
+            teams = battle
 
         our_team = None
 
-        # teams as dict
+        # dict format
         if isinstance(teams, dict):
+
             our_team = teams.get(TEAM_ID)
 
-        # teams as list
+        # list format
         elif isinstance(teams, list):
 
             for t in teams:
 
-                if (
-                    isinstance(t, dict)
-                    and t.get("id") == TEAM_ID
-                ):
+                if not isinstance(t, dict):
+                    continue
+
+                tid2 = (
+                    t.get("id")
+                    or t.get("team")
+                    or t.get("teamId")
+                )
+
+                if tid2 == TEAM_ID:
                     our_team = t
                     break
 
@@ -107,23 +122,30 @@ for tid in ids:
         if score < 2000:
             continue
 
-        results.append(
-            f"{data.get('fullName')} | "
-            f"Score: {score} | "
-            f"https://lichess.org/tournament/{tid}"
-        )
+        results.append({
+            "name": tdata.get("fullName"),
+            "score": score,
+            "url": f"https://lichess.org/tournament/{tid}"
+        })
 
-        print("MATCH:", tid)
+        print("MATCH FOUND:", tid)
 
         time.sleep(0.5)
 
     except Exception as e:
-        print("ERROR:", tid, e)
+        print("ERROR:", e)
 
-print("\n=== RESULTS ===\n")
+print("\n========================")
+print("TOTAL ARENAS CHECKED:", count)
+print("========================\n")
 
 if not results:
     print("No matching tournaments found")
 
-for x in results:
-    print(x)
+for r in results:
+
+    print(
+        f"{r['name']} | "
+        f"Score: {r['score']} | "
+        f"{r['url']}"
+    )
