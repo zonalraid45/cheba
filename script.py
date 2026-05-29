@@ -15,7 +15,7 @@ session.headers.update({
     "Accept-Language": "en-US,en;q=0.9"
 })
 
-# Better URL
+# Team page
 url = f"https://lichess.org/team/{TEAM_ID}"
 
 resp = session.get(url, timeout=20)
@@ -49,14 +49,14 @@ for tid in ids:
 
         clock = data.get("clock", {})
 
-        # 3+0
+        # 3+0 only
         if clock.get("limit") != 180:
             continue
 
         if clock.get("increment") != 0:
             continue
 
-        # 12 hours
+        # 12 hour only
         if data.get("minutes") != 720:
             continue
 
@@ -65,25 +65,20 @@ for tid in ids:
         if not battle:
             continue
 
-        teams = battle.get("teams", [])
+        teams = battle.get("teams", {})
 
-        our_team = None
-
-        for t in teams:
-            if t.get("id") == TEAM_ID:
-                our_team = t
-                break
+        our_team = teams.get(TEAM_ID)
 
         if not our_team:
             continue
 
-        # first place
-        if our_team.get("rank") != 1:
+        # Must be first
+        if our_team.get("rank", 999) != 1:
             continue
 
-        score = our_team.get("score", 0)
+        # Must have 2000+ points
+        score = our_team.get("nbPoints", 0)
 
-        # 2000+
         if score < 2000:
             continue
 
