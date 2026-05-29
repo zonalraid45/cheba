@@ -1,25 +1,40 @@
-name: Lichess Team Battle Scan
+name: Scan Lichess team battles
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */12 * * *'
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
 
 jobs:
   scan:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
 
     steps:
-      - name: Checkout
+      - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.12"
 
-      - name: Install deps
-        run: pip install -r requirements.txt
+      - name: Run scanner
+        env:
+          LICHESS_TOKEN: ${{ secrets.LICHESS_TOKEN }}
+        run: |
+          python scripts/script.py
 
-      - name: Run script
-        run: python -u script.py
+      - name: Show Markdown report
+        run: |
+          cat output/matches.md
+
+      - name: Upload reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: lichess-team-battle-matches
+          path: output/
+          if-no-files-found: error
