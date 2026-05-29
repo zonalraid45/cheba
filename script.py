@@ -7,145 +7,186 @@ TEAM_ID = "--elite-chess-players-union--"
 session = requests.Session()
 
 session.headers.update({
-    "User-Agent": "Mozilla/5.0",
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
     "Accept": "application/x-ndjson"
 })
 
-# Official API endpoint
-url = f"https://lichess.org/api/team/{TEAM_ID}/arena"
-
-print("Fetching full arena history...")
-
-r = session.get(url, stream=True, timeout=60)
-
-if r.status_code != 200:
-    print("Failed:", r.status_code)
-    exit()
-
 results = []
 
-count = 0
+total_checked = 0
+page = 1
 
-for line in r.iter_lines():
+print("Fetching ALL historical arenas...\n")
 
-    if not line:
-        continue
+while True:
 
-    try:
-        data = json.loads(line)
+    print(f"PAGE {page}")
 
-        count += 1
+    url = f"https://lichess.org/api/team/{TEAM_ID}/arena?page={page}"
 
-        tid = data.get("id")
+    r = session.get(url, stream=True, timeout=60)
 
-        print("Checking:", tid)
+    if r.status_code != 200:
+        print("Failed page:", page)
+        break
 
-        # Need full tournament details
-        api_url = f"https://lichess.org/api/tournament/{tid}"
+    found_any = False
 
-        rr = session.get(api_url, timeout=20)
+    for line in r.iter_lines():
 
-        if rr.status_code != 200:
+        if not line:
             continue
 
-        tdata = rr.json()
+        found_any = True
 
-        clock = tdata.get("clock", {})
+        try:
 
-        # 3+0
-        if clock.get("limit") != 180:
-            continue
+            data = json.loads(line)
 
-        if clock.get("increment") != 0:
-            continue
+            tid = data.get("id")
 
-        # 12h
-        if tdata.get("minutes") != 720:
-            continue
+            if not tid:
+                continue
 
-        battle = tdata.get("teamBattle")
+            total_checked += 1
 
-        if not battle:
-            continue
+            print("Checking:", tid)
 
-        teams = None
+            # Full tournament API
+            api_url = f"https://lichess.org/api/tournament/{tid}"
 
-        if isinstance(battle, dict):
-            teams = battle.get("teams")
+            rr = session.get(api_url, timeout=30)
 
-        elif isinstance(battle, list):
-            teams = battle
+            if rr.status_code != 200:
+                continue
 
-        our_team = None
+            tdata = rr.json()
 
-        # dict format
-        if isinstance(teams, dict):
+            # Some responses are weird arrays
+            if not isinstance(tdata, dict):
+                continue
 
-            our_team = teams.get(TEAM_ID)
+            clock = tdata.get("clock", {})
 
-        # list format
-        elif isinstance(teams, list):
+            # 3+0 only
+            if clock.get("limit") != 180:
+                continue
 
-            for t in teams:
+            if clock.get("increment") != 0:
+                continue
 
-                if not isinstance(t, dict):
-                    continue
+            # 12h only
+            if tdata.get("minutes") != 720:
+                continue
 
-                tid2 = (
-                    t.get("id")
-                    or t.get("team")
-                    or t.get("teamId")
-                )
+            battle = tdata.get("teamBattle")
 
-                if tid2 == TEAM_ID:
-                    our_team = t
-                    break
+            if not battle:
+                continue
 
-        if not our_team:
-            continue
+            teams = None
 
-        rank = (
-            our_team.get("rank")
-            or our_team.get("place")
-            or 999
-        )
+            # teamBattle may itself be list
+            if isinstance(battle, list):
+                teams = battle
 
-        if rank != 1:
-            continue
+            # or normal dict
+            elif isinstance(battle, dict):
+                teams = battle.get("teams")
 
-        score = (
-            our_team.get("nbPoints")
-            or our_team.get("score")
-            or 0
-        )
+            if not teams:
+                continue
 
-        if score < 2000:
-            continue
+            our_team = None
 
-        results.append({
-            "name": tdata.get("fullName"),
-            "score": score,
-            "url": f"https://lichess.org/tournament/{tid}"
-        })
+            # dict format
+            if isinstance(teams, dict):
 
-        print("MATCH FOUND:", tid)
+                our_team = teams.get(TEAM_ID)
 
-        time.sleep(0.5)
+            # list format
+            elif isinstance(teams, list):
 
-    except Exception as e:
-        print("ERROR:", e)
+                for t in teams:
+
+                    if not isinstance(t, dict):
+                        continue
+
+                    tid2 = (
+                        t.get("id")
+                        or t.get("team")
+                        or t.get("teamId")
+                    )
+
+                    if tid2 == TEAM_ID:
+                        our_team = t
+                        break
+
+            if not our_team:
+                continue
+
+            rank = (
+                our_team.get("rank")
+                or our_team.get("place")
+                or 999
+            )
+
+            # Must be first place
+            if rank != 1:
+                continue
+
+            score = (
+                our_team.get("nbPoints")
+                or our_team.get("score")
+                or 0
+            )
+
+            # Must be 2000+
+            if score < 2000:
+                continue
+
+            result = (
+                f"{tdata.get('fullName')} | "
+                f"Score: {score} | "
+                f"https://lichess.org/tournament/{tid}"
+            )
+
+            results.append(result)
+
+            print("MATCH FOUND!")
+
+            time.sleep(0.5)
+
+        except Exception as e:
+
+            print("ERROR:", e)
+
+    # No more arenas
+    if not found_any:
+        print("No more arenas found")
+        break
+
+    print(f"Finished page {page}\n")
+
+    page += 1
+
+    time.sleep(1)
 
 print("\n========================")
-print("TOTAL ARENAS CHECKED:", count)
+print("TOTAL ARENAS CHECKED:", total_checked)
 print("========================\n")
 
 if not results:
+
     print("No matching tournaments found")
 
-for r in results:
+else:
 
-    print(
-        f"{r['name']} | "
-        f"Score: {r['score']} | "
-        f"{r['url']}"
-    )
+    print("MATCHES:\n")
+
+    for r in results:
+        print(r)
