@@ -26,7 +26,7 @@ jobs:
         env:
           LICHESS_TOKEN: ${{ secrets.LICHESS_TOKEN }}
         run: |
-          python scripts/script.py
+          python -u script.py
 
       - name: Show Markdown report
         run: |
